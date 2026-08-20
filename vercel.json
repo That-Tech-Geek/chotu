@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pip install -e .",
+  "functions": {
+    "api/index.py": {
+      "memory": 256,
+      "maxDuration": 30
+    }
+  },
+  "crons": [
+    {
+      "path": "/v1/internal/cron/evolve",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}
