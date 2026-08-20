@@ -12,23 +12,29 @@ class KillSwitch:
         self,
         max_price: float,
         max_rounds: int = 30,
-        min_confidence: float = 0.3,
+        min_identity_confidence: float = 0.3,
     ):
         self.max_price = max_price
         self.max_rounds = max_rounds
-        self.min_confidence = min_confidence
+        self.min_identity_confidence = min_identity_confidence
 
     def evaluate(self, deal: Deal, ctx: NegotiationContext) -> str | None:
         """Return 'STOP: reason' or None."""
         if deal.price is not None and deal.price > self.max_price:
             return "STOP: price > max_price"
-        if deal.quantity is not None and isinstance(deal.quantity, float):
+        if deal.quantity is not None:
             if ctx.negotiation.quantity and deal.quantity != ctx.negotiation.quantity:
                 return "STOP: quantity changed"
         if ctx.negotiation.rounds and len(ctx.negotiation.rounds) > self.max_rounds:
             return "STOP: too many rounds"
-        if ctx.relationship is not None and len(ctx.supplier.id) == 0:
-            return "STOP: supplier identity uncertainty"
+        # Identity confidence: empty supplier id is a hard stop; else if the
+        # relationship carries a confidence that is below the threshold, we stop.
+        if not ctx.supplier.id:
+            return "STOP: supplier identity uncertain"
+        if ctx.relationship is not None:
+            id_conf = getattr(ctx.relationship, "identity_confidence", None)
+            if id_conf is not None and id_conf < self.min_identity_confidence:
+                return "STOP: identity confidence below threshold"
         return None
 
     def state_hash(self, ctx: NegotiationContext) -> str:

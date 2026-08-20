@@ -28,13 +28,17 @@ class PolicyEnvelope:
         self.max_rounds = max_rounds
         self.max_negotiation_seconds = max_negotiation_seconds
 
-    def check_deal(self, deal: Deal) -> list[str]:
+    def check_deal(self, deal: Deal, base_cost: float | None = None) -> list[str]:
         violations: list[str] = []
         if deal.price is not None:
             if deal.price > self.max_unit_price:
                 violations.append("price exceeds max_unit_price")
             if deal.price < self.min_unit_price:
                 violations.append("price below min_unit_price")
+        if base_cost is not None and deal.price is not None:
+            margin = (base_cost - deal.price) / base_cost if base_cost > 0 else 0.0
+            if margin < self.min_margin:
+                violations.append("margin below min_margin")
         if deal.quantity is not None:
             if self.max_quantity is not None and deal.quantity > self.max_quantity:
                 violations.append("quantity exceeds envelope")

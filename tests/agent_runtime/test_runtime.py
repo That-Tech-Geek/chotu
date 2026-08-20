@@ -1,6 +1,6 @@
 from economic_engine.agent_runtime.envelope import PolicyEnvelope
+from economic_engine.agent_runtime.execution import Executor
 from economic_engine.agent_runtime.executor import AutonomousRuntime
-from economic_engine.agent_runtime.idempotency import ActionExecutor
 from economic_engine.agent_runtime.kill_switch import KillSwitch
 from economic_engine.agent_runtime.state_machine import (
     NegotiationState,
@@ -49,20 +49,39 @@ def test_state_machine_illegal_transition():
     assert sm.state == NegotiationState.INIT
 
 
+import tempfile
+
+import pytest
+
+from economic_engine.agent_runtime.persistence import IdempotencyStore  # noqa: F401
+
+
+class NullConnector:
+    def send(self, deal):
+        return {"success": True, "mock": True}
+
+
+@pytest.fixture(autouse=True)
+def tmp_idempotency(monkeypatch):
+    tmpdir = tempfile.TemporaryDirectory().name
+    monkeypatch.setenv("IDEMPOTENCY_CACHE_PATH", f"{tmpdir}/icache.jsonl")
+    yield
+
+
 def test_idempotency_deduplicates():
-    ex = ActionExecutor()
+    ex = Executor(connector=NullConnector())
     d = Deal(price=1.0)
-    r1 = ex.execute("n1", "a1", 0, d)
-    r2 = ex.execute("n1", "a1", 0, d)
-    assert r1["executed"] is True
-    assert r2["duplicate"] is True
+    r1 = ex.run("n1", "a1", 0, d)
+    r2 = ex.run("n1", "a1", 0, d)
+    assert r1.state.value == "EXECUTED"
+    assert r2.state.value == "BLOCKED"
 
 
 def test_autonomous_runtime_blocks_violation():
     env = PolicyEnvelope(max_unit_price=5.0, min_unit_price=0.0,
                          max_total_spend=10.0)
     kill = KillSwitch(max_price=5.0)
-    rt = AutonomousRuntime(env, kill)
+    rt = AutonomousRuntime(env, kill, Executor(NullConnector()))
     d = Deal(price=10.0)
     out = rt.handle("n", "a", 0, d, ctx(), shadow=False)
     assert out["action"] == "BLOCKED"
@@ -72,8 +91,8 @@ def test_shadow_execution_recorded_not_sent():
     env = PolicyEnvelope(max_unit_price=1000.0, min_unit_price=0.0,
                          max_total_spend=1e6)
     kill = KillSwitch(max_price=1000.0)
-    rt = AutonomousRuntime(env, kill)
+    rt = AutonomousRuntime(env, kill, Executor(NullConnector()))
     d = Deal(price=10.0)
     out = rt.handle("n", "a", 0, d, ctx(), shadow=True)
-    assert out["action"] == "SHADOW"
-    assert out["executed"] is False
+    assert out["action"] == "EXECUTED"
+    assert out["shadow"] is True

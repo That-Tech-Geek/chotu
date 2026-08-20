@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from economic_engine.agent_runtime.envelope import PolicyEnvelope
+from economic_engine.agent_runtime.execution import Executor
 from economic_engine.agent_runtime.executor import AutonomousRuntime
 from economic_engine.agent_runtime.kill_switch import KillSwitch
 from economic_engine.simulation.benchmark import (
@@ -20,13 +21,20 @@ class ShadowPolicy:
     """Chotu wrapped in AutonomousRuntime with shadow=True."""
 
     def __init__(self):
+        from economic_engine.connectors.providers import NullActionConnector
+
+        class _NullConn(NullActionConnector):
+            pass
+
         envelope = PolicyEnvelope(
             max_unit_price=200.0,
             min_unit_price=0.0,
             max_total_spend=1_000_000.0,
         )
         kill = KillSwitch(max_price=200.0)
-        self.runtime = AutonomousRuntime(envelope, kill)
+        self.runtime = AutonomousRuntime(
+            envelope, kill, Executor(connector=_NullConn()),
+        )
         self.brain = ChotuPolicy()
 
     def next_offer(self, ctx, current_offer):
