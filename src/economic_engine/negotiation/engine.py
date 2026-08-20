@@ -24,7 +24,9 @@ class NegotiationEngine:
         mc_mode: str = "STANDARD",
         exposure_capital: float = 100_000.0,
         type_prior=None,
+        lambda_override: float | None = None,
     ):
+        self.lambda_override = lambda_override
         self.type_prior = type_prior
         self.opponent = opponent or OpponentState(
             OpponentLatent(reservation_price=1.0, reservation_std=0.15)
@@ -44,7 +46,9 @@ class NegotiationEngine:
             if self.type_prior is not None:
                 self.opponent = self.type_prior.initial_opponent(
                     ctx_base=base,
-                    supplier_type=ctx.supplier.category if ctx.supplier else "generic",
+                    supplier_type=(
+                        ctx.product.category if ctx.product else "generic"
+                    ),
                 )
             else:
                 self.opponent = OpponentState(
@@ -93,7 +97,11 @@ class NegotiationEngine:
                 win_return=max(abs(expected), 1.0) / self.exposure_capital,
                 fraction=0.25,
             )
-            lambda_ = max(1.0 - kelly, 0.2)
+            lambda_ = (
+                self.lambda_override
+                if self.lambda_override is not None
+                else max(1.0 - kelly, 0.2)
+            )
             utility = expected - lambda_ * abs(cvar_95)
             scores.append({
                 "candidate": cand,

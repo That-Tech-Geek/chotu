@@ -107,21 +107,28 @@ python -m pytest
 uvicorn api.index:app --reload
 ```
 
-## Benchmark
+## Benchmark (Pareto + leakage-safe hierarchy)
 
 `simulation/benchmark.py` plays Chotu against synthetic opponents generated
-with independent cost/reservation/patience/urgency parameters, and compares
-it against baselines (fixed price, linear concession, tit-for-tat, random,
-Nash heuristic):
+with independent cost/reservation/patience/urgency parameters. Held-out split
+guards against overfitting to the benchmark seed set.
 
-```python
-from economic_engine.simulation.benchmark import benchmark, ChotuPolicy
-benchmark(n=100, policies={"chotu": ChotuPolicy()})
+`simulation/pareto.py` runs a risk-aversion sweep over lambda and maps
+`deal_rate vs surplus` for Chotu and baselines — answers '**is Chotu actually
+on the efficient frontier?**' rather than 'does it win on one metric?'.
+
+`simulation/prior_leakage.py` audits the hierarchical prior `GlobalPrior →
+SupplierTypePrior → SupplierPosterior`: prior constructed only from data
+visible before time t, so we never get 'hindsight-smart' initialization.
+
+Example runner in `examples/pareto_sweep.py`:
+
+```bash
+python examples/pareto_sweep.py
 ```
 
-This is the empirical backbone of the engine: if Chotu is meant to beat
-humans/simple strategies, this is where that claim is tested, measured in
-surplus, win-rate, avg rounds (deal time) and walkaway rate.
+This is the empirical backbone of the engine — the checker purpose-built to
+expose whether Chotu actually wins (or where on the frontier it sits).
 
 ## Deploy to Vercel
 
