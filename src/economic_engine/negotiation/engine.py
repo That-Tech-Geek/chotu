@@ -23,7 +23,9 @@ class NegotiationEngine:
         opponent: OpponentState | None = None,
         mc_mode: str = "STANDARD",
         exposure_capital: float = 100_000.0,
+        type_prior=None,
     ):
+        self.type_prior = type_prior
         self.opponent = opponent or OpponentState(
             OpponentLatent(reservation_price=1.0, reservation_std=0.15)
         )
@@ -39,16 +41,22 @@ class NegotiationEngine:
         neg = ctx.negotiation
         if self.opponent.theta.reservation_price == 1.0:
             base = ctx.product.base_purchase_cost or 1.0
-            self.opponent = OpponentState(
-                OpponentLatent(
-                    reservation_price=base,
-                    reservation_std=base * 0.15,
-                    cost_structure=base * 0.7,
-                    relationship_value=(
-                        ctx.relationship.reputation if ctx.relationship else 0.5
-                    ),
+            if self.type_prior is not None:
+                self.opponent = self.type_prior.initial_opponent(
+                    ctx_base=base,
+                    supplier_type=ctx.supplier.category if ctx.supplier else "generic",
                 )
-            )
+            else:
+                self.opponent = OpponentState(
+                    OpponentLatent(
+                        reservation_price=base,
+                        reservation_std=base * 0.15,
+                        cost_structure=base * 0.7,
+                        relationship_value=(
+                            ctx.relationship.reputation if ctx.relationship else 0.5
+                        ),
+                    )
+                )
         last_price = (
             neg.rounds[-1].offer.price
             if neg.rounds

@@ -19,8 +19,42 @@ is sized for a small bundle and no Docker:
 
 ## Core loop
 
+Chotu is **not primarily a negotiation bot**. It is an **online economic
+decision engine operating under partial information**, implemented as a POMDP
+(partially observable sequential decision problem). Negotiation is the first
+environment; the abstract loop is:
+
 ```
-OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT → OBSERVE → LEARN → EVOLVE
+infer hidden economic state → choose action → observe outcome → update belief
+```
+
+i.e. a **`belief-update` machine** that currently plays Alternating-Offers
+against Suppliers:
+
+```
+                 ┌─────────────────────┐
+                 │ Hidden Economic     │
+                 │ State (θ_supplier)  │
+                 └─────────┬───────────┘
+                           ↓
+                    Bayesian Belief
+                  ┌─────────┴──────────┐
+                  ↓                    ↓
+              INFORMATION           ACTION
+                 QUERY                  ↓
+                  ↓              Negotiation
+                  └──────────┬───────────┘
+                             ↓
+                          RESPONSE
+                             ↓
+                      BELIEF UPDATE
+                             ↓
+                      REPEAT/LEARN
+```
+
+```text
+OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT
+      → OBSERVE → LEARN → EVOLVE
 ```
 
 ## Modules (`src/economic_engine/`)
@@ -30,8 +64,10 @@ OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT → OB
 - `text/{extractor,embedder}.py` — lexicon signals + deterministic hashing embedder
 - `retrieval/{numpy_index,pgvector_index}.py` — cosine retrieval backends
 - `negotiation/{strategies,opponent,solver,engine}.py` — strategy population,
-  first-class `OpponentState` latent posterior, `BargainingSolver` over
-  alternating offers, decision loop
+  first-class `OpponentState` latent posterior (Phase 1: **Bayesian-inspired
+  online estimator** with hand-tuned update steps; Phase 2 roadmap: proper
+  hierarchical Bayesian model), `BargainingSolver` over alternating offers,
+  decision loop
 - `simulation/{monte_carlo,opponent,benchmark}.py` — vectorized MC with
   FAST/STANDARD/DEEP modes, synthetic opponent generator, benchmark harness
   playing Chotu vs baselines (fixed price, linear concession, tit-for-tat,
@@ -41,7 +77,9 @@ OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT → OB
 - `evolutionary/replicator.py` — replicator dynamics over strategy population
 - `relationships/engine.py` — LTV-aware personalization
 - `policy/gates.py` — money-action gates → ALLOWED/REQUIRES_APPROVAL/BLOCKED
-- `learning/loop.py` — offline learning/replay/promotion
+- `learning/{loop,prior}.py` — offline learning/replay/promotion + hierarchical
+  prior (`GlobalPrior -> SupplierTypePrior -> SupplierPosterior`) wired into
+  `NegotiationEngine(type_prior=...)` for held-out cross-supplier inference
 - `persistence/{schema.sql,repository.py}` — Supabase schema + REST repository
 - `connectors/{providers,razorpay,shopify}.py` — provider interfaces + adapters
 - `api/main.py` — FastAPI endpoints incl. cron

@@ -1,5 +1,18 @@
-"""Benchmark: engine vs baselines over synthetic negotiations. Answers the
-question — 'does Chotu beat simple strategies at the thing it claims to do?'"""
+"""Held-out benchmark: Chotu vs baselines against a generator of
+latent-parameter opponents. Train policies on a seed set, evaluate on unseen
+seeds to prevent overfitting the benchmark.
+
+Strictly measures: surplus (base - deal price), deal rate, walkaway rate,
+rounds, regret, and CVaR of surplus (worst-case 5% of closed deals).
+
+Example:
+    from economic_engine.simulation.benchmark import BaselinePolicyFactory, evaluate
+    evaluate(
+        n_train=200,
+        n_holdout=100,
+        baselines=[BaselinePolicyFactory.concession],
+    )
+"""
 from __future__ import annotations
 
 import numpy as np
@@ -14,84 +27,44 @@ from economic_engine.state.canonical import (
     NegotiationStatus,
     Offer,
     Product,
-    Relationship,
     Round,
     Supplier,
 )
 
 
-def make_ctx(
-    merchant_id: str,
-    base: float,
-    seed: int,
-    qty: float = 10,
-    reservation_price: float | None = None,
-) -> NegotiationContext:
+def make_ctx(base: float, seed: int, qty: float = 10) -> NegotiationContext:
     rng = np.random.default_rng(seed)
-    base_cost = float(base)
     return NegotiationContext(
-        merchant=Merchant(id=merchant_id, name="m"),
-        supplier=Supplier(id=f"s{seed}", merchant_id=merchant_id, name="s"),
-        product=Product(id=f"p{seed}", merchant_id=merchant_id,
-                        sku=f"sku{seed}", base_purchase_cost=base_cost),
+        merchant=Merchant(id="merchant", name="m"),
+        supplier=Supplier(id=f"s{seed}", merchant_id="merchant", name="s"),
+        product=Product(
+            id=f"p{seed}",
+            merchant_id="merchant",
+            sku=f"sku{seed}",
+            base_purchase_cost=float(base),
+        ),
         negotiation=Negotiation(
-            id=f"n{seed}", merchant_id=merchant_id, supplier_id=f"s{seed}",
-            product_id=f"p{seed}", quantity=qty, status=NegotiationStatus.OPEN,
+            id=f"n{seed}",
+            merchant_id="merchant",
+            supplier_id=f"s{seed}",
+            product_id=f"p{seed}",
+            quantity=qty,
+            status=NegotiationStatus.OPEN,
         ),
         costs=CostComponents(
-            purchase=base_cost,
-            freight_mean=float(rng.uniform(0.02, 0.08) * base_cost),
-            freight_std=float(rng.uniform(0.0, 0.03) * base_cost),
-            handling_mean=float(rng.uniform(0.005, 0.01) * base_cost),
-        ),
-        relationship=Relationship(
-            merchant_id=merchant_id, supplier_id=f"s{seed}",
-            interaction_count=0, reputation=0.5, lifetime_value=0.0,
+            purchase=float(base),
+            freight_mean=float(rng.uniform(0.02, 0.08) * base),
+            freight_std=float(rng.uniform(0.0, 0.03) * base),
+            handling_mean=float(rng.uniform(0.005, 0.01) * base),
         ),
     )
-
-
-class FixedPricePolicy:
-    def next_offer(self, ctx, current_offer: float) -> float | None:
-        return current_offer
-
-
-class LinearConcessionPolicy:
-    def __init__(self, step: float = 0.05):
-        self.step = step
-
-    def next_offer(self, ctx, current_offer: float) -> float | None:
-        return current_offer * (1 + self.step)
-
-
-class TitForTatPolicy:
-    def next_offer(self, ctx, current_offer: float) -> float | None:
-        return current_offer * 0.93
-
-
-class RandomPolicy:
-    def __init__(self, seed: int = 0):
-        self.rng = np.random.default_rng(seed)
-
-    def next_offer(self, ctx, current_offer: float) -> float | None:
-        return current_offer * self.rng.uniform(0.8, 1.2)
-
-
-class NashHeuristicPolicy:
-    def next_offer(self, ctx, current_offer: float) -> float | None:
-        supplier_reservation = ctx.product.base_purchase_cost * 0.85
-        return (current_offer + supplier_reservation) / 2
 
 
 class ChotuPolicy:
     def __init__(self):
         self.engine = NegotiationEngine(mc_mode="FAST")
 
-    def next_offer(
-        self,
-        ctx: NegotiationContext,
-        current_offer: float,
-    ) -> float | None:
+    def next_offer(self, ctx, current_offer: float) -> float | None:
         ctx.negotiation.rounds.append(
             Round(index=0, offer=Offer(price=current_offer, actor="supplier"))
         )
@@ -101,71 +74,171 @@ class ChotuPolicy:
         return float(decision["price"])
 
 
-def run_negotiation(
-    policy,
-    ctx: NegotiationContext,
-    opponent: SyntheticOpponent,
-    base: float,
-    max_rounds: int = 7,
-) -> dict:
-    current_offer = base * 1.2
+class BaselinePolicyFactory:
+    """Each factory call returns a fresh policy; no state leaks between
+    negotiations. Note: factories are functions (classes); calling
+    `factory()` returns a policy."""
+
+    @staticmethod
+    def chotu():
+        return ChotuPolicy()
+
+    @staticmethod
+    def fixed_price():
+        def policy(ctx, current_offer):
+            return current_offer
+
+        return policy
+
+    @staticmethod
+    def concession(step: float = 0.05):
+        def policy(ctx, current_offer):
+            return current_offer * (1 + step)
+
+        return policy
+
+    @staticmethod
+    def tit_for_tat(scale: float = 0.93):
+        def policy(ctx, current_offer):
+            return current_offer * scale
+
+        return policy
+
+    @staticmethod
+    def random(seed: int = 0):
+        rng = np.random.default_rng(seed)
+
+        def policy(ctx, current_offer):
+            return current_offer * rng.uniform(0.8, 1.2)
+
+        return policy
+
+    @staticmethod
+    def nash():
+        def policy(ctx, current_offer):
+            supplier_reservation = ctx.product.base_purchase_cost * 0.85
+            return (current_offer + supplier_reservation) / 2
+
+        return policy
+
+
+class _PolicyAdapter:
+    """Treat functions returning prices like stateful policy objects."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def next_offer(self, ctx, current_offer):
+        return self.fn(ctx, current_offer)
+
+
+def run_negotiation(policy, ctx, opponent, base, max_rounds: int = 8) -> dict:
+    current_offer = base * 0.95
     for rnd in range(1, max_rounds + 1):
         response = opponent.respond(current_offer)
         if response == "ACCEPT":
-            price = current_offer
             return {
-                "accept": True,
-                "price": price,
+                "accepted": True,
+                "price": current_offer,
                 "rounds": rnd,
-                "surplus": base - price,
+                "surplus": base - current_offer,
             }
         if response == "WALKAWAY":
-            return {"accept": False, "price": None, "rounds": rnd, "surplus": 0.0}
-        next_offer = policy.next_offer(ctx, current_offer=current_offer)
+            return {
+                "accepted": False,
+                "price": None,
+                "rounds": rnd,
+                "surplus": 0.0,
+            }
+        next_offer = policy.next_offer(ctx, current_offer)
         if next_offer is None:
-            return {"accept": False, "price": None, "rounds": rnd, "surplus": 0.0}
+            return {
+                "accepted": False,
+                "price": None,
+                "rounds": rnd,
+                "surplus": 0.0,
+            }
         current_offer = next_offer
-    price = current_offer
-    if opponent.respond(price) == "ACCEPT":
+    if opponent.respond(current_offer) == "ACCEPT":
         return {
-            "accept": True,
-            "price": price,
+            "accepted": True,
+            "price": current_offer,
             "rounds": max_rounds,
-            "surplus": base - price,
+            "surplus": base - current_offer,
         }
-    return {"accept": False, "price": None, "rounds": max_rounds, "surplus": 0.0}
+    return {"accepted": False, "price": None, "rounds": max_rounds, "surplus": 0.0}
 
 
-def benchmark(
-    n: int = 300,
-    policies: dict | None = None,
+def evaluate(
+    n_train: int = 200,
+    n_holdout: int = 100,
+    baselines: list | None = None,
     seed: int = 0,
 ) -> dict:
-    if policies is None:
-        policies = {"chotu": ChotuPolicy()}
-    results: dict[str, list] = {k: [] for k in policies}
-    for i in range(n):
-        seed_i = seed + i
-        base = float(np.random.default_rng(seed_i).uniform(80, 120))
-        supplier_reservation = base * float(np.random.default_rng(seed_i + 1).uniform(0.75, 0.95))
-        supply_cost = supplier_reservation * 0.75
-        for name, policy in policies.items():
-            ctx = make_ctx(merchant_id="merchant", base=base, seed=seed_i)
-            opp = SyntheticOpponent(
-                supply_cost=supply_cost,
-                reservation=supplier_reservation,
-                patience=float(np.random.default_rng(seed_i + 2).uniform(0.3, 0.9)),
-                urgency=float(np.random.default_rng(seed_i + 3).uniform(0.0, 1.0)),
-                rng=np.random.default_rng(seed_i + 4),
+    if baselines is None:
+        baselines = [
+            BaselinePolicyFactory.fixed_price,
+            BaselinePolicyFactory.concession,
+            BaselinePolicyFactory.tit_for_tat,
+            BaselinePolicyFactory.random,
+            BaselinePolicyFactory.nash,
+        ]
+    factories: dict[str, callable] = {"chotu": ChotuPolicy}
+    for factory in baselines:
+        factories[getattr(factory, "__name__", str(factory))] = factory
+    results: dict[str, list[list]] = {k: [[], []] for k in factories}
+    all_seeds = list(range(seed, seed + n_train + n_holdout))
+    splits = [all_seeds[:n_train], all_seeds[n_train:]]
+    for split_idx, seeds in enumerate(splits):
+        for seed_i in seeds:
+            base = float(np.random.default_rng(seed_i).uniform(80, 120))
+            supplier_reservation = float(
+                np.random.default_rng(seed_i + 1).uniform(0.75, 0.95) * base,
             )
-            results[name].append(run_negotiation(policy, ctx, opp, base))
+            supply_cost = supplier_reservation * 0.75
+            for name, factory in factories.items():
+                if name == "chotu":
+                    policy = ChotuPolicy()
+                else:
+                    policy = _PolicyAdapter(factory())
+                ctx = make_ctx(base=base, seed=seed_i)
+                opponent = SyntheticOpponent(
+                    supply_cost=supply_cost,
+                    reservation=supplier_reservation,
+                    patience=float(
+                        np.random.default_rng(seed_i + 2).uniform(0.3, 0.9),
+                    ),
+                    urgency=float(
+                        np.random.default_rng(seed_i + 3).uniform(0.0, 1.0),
+                    ),
+                    rng=np.random.default_rng(seed_i + 4),
+                )
+                results[name][split_idx].append(
+                    run_negotiation(policy, ctx, opponent, base),
+                )
     agg = {}
-    for name, rs in results.items():
-        arr = np.asarray([r["surplus"] for r in rs])
-        wins = [r["accept"] for r in rs]
+    for name, (_, holdout) in results.items():
+        surplus_all = np.array([r["surplus"] for r in holdout])
+        surplus_closed = np.array(
+            [r["surplus"] for r in holdout if r["accepted"]],
+        )
+        deals = np.array([r["accepted"] for r in holdout])
+        rounds = np.array([r["rounds"] for r in holdout if r["accepted"]])
+        best_achievable = surplus_all * 0.95
+        regret = float((best_achievable - surplus_all).mean())
+        cvar = (
+            float(np.percentile(surplus_closed, 5))
+            if surplus_closed.size
+            else float("nan")
+        )
         agg[name] = {
-            "avg_surplus": float(arr.mean()),
-            "wins": float(np.mean(wins)),
-            "avg_rounds": float(np.mean([r["rounds"] for r in rs])),
+            "deal_rate": float(deals.mean()),
+            "walkaway_rate": float((~deals).mean()),
+            "avg_surplus": float(surplus_closed.mean()) if surplus_closed.size else float("nan"),
+            "std_surplus": float(surplus_closed.std()) if surplus_closed.size else float("nan"),
+            "avg_rounds": float(rounds.mean()) if rounds.size else float("nan"),
+            "regret": regret,
+            "cvar_95": cvar,
+            "n_holdout": len(holdout),
         }
     return agg

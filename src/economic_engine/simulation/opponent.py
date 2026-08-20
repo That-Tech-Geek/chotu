@@ -7,47 +7,50 @@ import numpy as np
 
 
 class SyntheticOpponent:
+    """Supplier with latent economic state. Alternating-offers bargaining:
+    accepts if the offer beats its reservation *markup floor given the
+    pressure the round imposes; counters with a price withdrawing from the
+    opening ask proportionally to patience/urgency; walks away on sustained
+    lowball."""
+
     def __init__(
         self,
         supply_cost: float,
         reservation: float,
         patience: float = 0.5,
         urgency: float = 0.5,
-        discount: float = 0.95,
+        ask_markup: float = 0.25,
         rng: np.random.Generator | None = None,
     ):
         self.cost = supply_cost
         self.reservation = reservation
         self.patience = patience
         self.urgency = urgency
-        self.discount = discount
+        self.ask = float(rng.uniform(1.05, 1.35)) * reservation if ask_markup is None else reservation * (1 + ask_markup)
         self.round = 0
         self.rng = rng or np.random.default_rng()
 
     def respond(self, offer_price: float) -> str:
-        """Return ACCEPT/COUNTER/WALKAWAY for the price."""
-        margin = offer_price - self.reservation
-        time_pressure = self.round * (1 - self.patience) / 20
-        urgency = self.urgency * 0.1 + time_pressure
-        if margin < -self.reservation * 0.05 + urgency * self.reservation * 0.1:
-            walk_prob = min(0.05 + (1 - self.patience) * 0.1 * self.round, 0.5)
-            if self.rng.random() < walk_prob:
-                self.round += 1
-                return "WALKAWAY"
-        if margin >= 0.0:
-            p_accept = min(0.9, 0.4 + margin / max(self.reservation, 1e-3)
-                           + urgency)
-            if self.rng.random() < p_accept:
-                self.round += 1
+        time_pressure = self.round * self.urgency / 8
+        effective_reservation = self.reservation * (1 - 0.3 * min(time_pressure, 0.6))
+        if offer_price >= effective_reservation:
+            accept_p = min(
+                0.95,
+                0.5
+                + (offer_price - effective_reservation) / max(self.reservation, 1e-3)
+                + time_pressure,
+            )
+            if self.rng.random() < accept_p:
                 return "ACCEPT"
-        else:
-            ask = self.reservation * (1 + 0.05 * (1 - self.patience))
-            if offer_price >= ask:
-                self.round += 1
-                return "ACCEPT"
-        self.round += 1
+        walk_p = min(0.02 + 0.04 * self.round * (1 - self.patience), 0.4)
+        if offer_price < self.reservation * (1 - 0.1) and self.rng.random() < walk_p:
+            return "WALKAWAY"
         return "COUNTER"
 
-    def counter_offer(self, offer_price: float, discount_this_round: float) -> float:
-        move = 0.5 * (1 - self.patience) * discount_this_round
-        return (offer_price + self.reservation) / 2 * (1 - move * 0.1)
+    def counter_offer(self, offer_price: float) -> float:
+        progress = min(0.15 + (1 - self.patience) * 0.1 * self.round, 0.7)
+        desired = (
+            self.ask * (1 - progress)
+            + self.reservation * progress
+        )
+        return float(max(self.reservation * 0.98, desired))
