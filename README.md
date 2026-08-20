@@ -3,6 +3,19 @@
 Backend-only, ultra-low-latency negotiation API. **No LLM in the engine** — it
 talks to external LLM agents over HTTP (`User ↔ LLM ↔ Negotiation API`).
 
+## Brain / body separation
+
+```
+economic_engine/ (brain)   — returns Decision(price/qty/conf/utility)
+agent_runtime/   (body)    — envelope, kill-switch, state machine,
+                             idempotent executor, audit
+```
+
+The brain proposes; the body validates and executes. The new `canonical.Deal`
+holds the full procurement contract — price + MOQ + payment_terms +
+delivery_window + quality + warranty + currency + tax + validity — so
+automation never optimizes only the price.
+
 ## Architecture (serverless/Vercel, 250MB RAM)
 
 Hot path lives on **Vercel Python functions** (`api/index.py`), so everything
@@ -80,6 +93,12 @@ OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT
 - `learning/{loop,prior}.py` — offline learning/replay/promotion + hierarchical
   prior (`GlobalPrior -> SupplierTypePrior -> SupplierPosterior`) wired into
   `NegotiationEngine(type_prior=...)` for held-out cross-supplier inference
+- `agent_runtime/{envelope,kill_switch,state_machine,idempotency,executor}.py` —
+  hard economic constraints, deterministic kill switches, negotiation state
+  machine, idempotent action executor, autonomous runtime wrapper
+- `simulation/{ablation,calibration,frontier_benchmark,meta,shadow}.py` —
+  experiment suite: which component fires, calibration tables, Chotu-vs-union
+  of baselines, and shadow-mode harness
 - `persistence/{schema.sql,repository.py}` — Supabase schema + REST repository
 - `connectors/{providers,razorpay,shopify}.py` — provider interfaces + adapters
 - `api/main.py` — FastAPI endpoints incl. cron

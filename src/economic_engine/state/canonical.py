@@ -13,6 +13,21 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Deal(pydantic.BaseModel):
+    """Full procurement contract state — never just price."""
+
+    price: Optional[float] = None
+    quantity: Optional[float] = None
+    moq: Optional[float] = None
+    payment_terms: Optional[str] = None
+    delivery_window_days: Optional[int] = None
+    quality_grade: Optional[str] = None
+    warranty: Optional[str] = None
+    currency: Optional[str] = None
+    tax_inclusive: Optional[bool] = None
+    validity_seconds: Optional[int] = None
+
+
 class Merchant(pydantic.BaseModel):
     id: str
     name: str
