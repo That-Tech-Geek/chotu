@@ -93,9 +93,12 @@ OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT
 - `learning/{loop,prior}.py` — offline learning/replay/promotion + hierarchical
   prior (`GlobalPrior -> SupplierTypePrior -> SupplierPosterior`) wired into
   `NegotiationEngine(type_prior=...)` for held-out cross-supplier inference
-- `agent_runtime/{envelope,kill_switch,state_machine,idempotency,executor}.py` —
-  hard economic constraints, deterministic kill switches, negotiation state
-  machine, idempotent action executor, autonomous runtime wrapper
+- `agent_runtime/{envelope,kill_switch,state_machine,lifecycle,persistence,
+  execution,orchestrator,executor}.py` — hard economic constraints,
+  deterministic kill switches, negotiation state machine, Action lifecycle
+  (PROPOSED → VALIDATED → QUEUED → EXECUTING → EXECUTED/FAILED),
+  durable idempotency (Supabase-keyed; file cache fallback), actual connector
+  execution, end-to-end orchestrator
 - `simulation/{ablation,calibration,frontier_benchmark,meta,shadow}.py` —
   experiment suite: which component fires, calibration tables, Chotu-vs-union
   of baselines, and shadow-mode harness
