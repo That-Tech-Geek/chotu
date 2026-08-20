@@ -19,6 +19,8 @@ from economic_engine.simulation.benchmark import (
 from economic_engine.simulation.opponent import SyntheticOpponent
 
 
+def rng_signal(i): return float(np.random.default_rng(i + 100).random())
+
 def run_leakage_safe_experiment(n: int = 50, seed: int = 0) -> dict:
     global_prior = GlobalPrior()
     type_prior = SupplierTypePrior(global_prior)
@@ -45,12 +47,14 @@ def run_leakage_safe_experiment(n: int = 50, seed: int = 0) -> dict:
         surplus_over_time.append(r["surplus"])
         prior_mean = global_prior.mean
         leakage_errors.append(abs(prior_mean - supplier_reservation))
-        if r["accepted"]:
-            observation = (
-                opp.reservation if np.random.default_rng(seed_i + 100).random() < 0.3
-                else float(r["price"])
-            )
-            global_prior.add_observation(observation)
+        # Only t-indexed information flows into the prior — rejected deals
+        # count too. Some noise level approximates the "true reservation is
+        # intermittently revealed" notion the reviewer asked for.
+        if rng_signal(seed_i) < 0.5:
+            observation = opp.reservation
+        else:
+            observation = float(r["price"] or opp.reservation)
+        global_prior.add_observation(observation)
     first_half = leakage_errors[: len(leakage_errors) // 2]
     second_half = leakage_errors[len(leakage_errors) // 2 :]
     improvement = float(np.mean(first_half) - np.mean(second_half))

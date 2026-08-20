@@ -1,10 +1,9 @@
 import numpy as np
 
-from economic_engine.simulation.pareto import (
-    baseline_points,
-    pareto_rows,
-    sweep_lambdas,
-)
+from economic_engine.simulation.ablation import run_ablation
+from economic_engine.simulation.calibration import calibration_experiment
+from economic_engine.simulation.frontier_benchmark import run_frontier_benchmark
+from economic_engine.simulation.pareto import baseline_points, pareto_rows, sweep_lambdas
 from economic_engine.simulation.prior_leakage import run_leakage_safe_experiment
 
 
@@ -42,3 +41,22 @@ def test_leakage_safe_audit_runs():
         "prior_error_second_half",
     ):
         assert k in res
+
+
+def test_ablation_meta_runs():
+    res = run_ablation(n=6)
+    assert "A_no_learning" in res
+    for k, v in res.items():
+        assert 0.0 <= v["deal_rate"] <= 1.0
+
+
+def test_calibration_bands():
+    res = calibration_experiment(n=30)
+    assert 0.0 <= res.brier_score <= 1.0
+    assert len(res.reliability) >= 1
+
+
+def test_frontier_benchmark_smoke():
+    res = run_frontier_benchmark(n=6)
+    assert res["chotu_frontier_size"] >= 0
+    assert len(res["global_frontier"]) > 0
