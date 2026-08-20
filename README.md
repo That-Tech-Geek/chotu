@@ -27,12 +27,17 @@ OBSERVE → MODEL → GENERATE → SIMULATE → OPTIMIZE → GATE → ACT → OB
 
 - `state/canonical.py` — merchant/supplier/product/negotiation/... canonical models
 - `models/cost_engine.py` — landed cost as a distribution (P10..P95)
-- `models/supplier_model.py` — Bayesian posterior P(theta|history)
 - `text/{extractor,embedder}.py` — lexicon signals + deterministic hashing embedder
 - `retrieval/{numpy_index,pgvector_index}.py` — cosine retrieval backends
-- `negotiation/{strategies,game,engine}.py` — strategy population, alternating-offers model, decision loop
-- `simulation/monte_carlo.py` — vectorized MC with FAST/STANDARD/DEEP modes
-- `optimization/objectives.py` — CVaR, fractional Kelly, VOI
+- `negotiation/{strategies,opponent,solver,engine}.py` — strategy population,
+  first-class `OpponentState` latent posterior, `BargainingSolver` over
+  alternating offers, decision loop
+- `simulation/{monte_carlo,opponent,benchmark}.py` — vectorized MC with
+  FAST/STANDARD/DEEP modes, synthetic opponent generator, benchmark harness
+  playing Chotu vs baselines (fixed price, linear concession, tit-for-tat,
+  random, Nash heuristic)
+- `optimization/{objectives,information}.py` — CVaR, fractional Kelly, sim-
+  estimated VOI
 - `evolutionary/replicator.py` — replicator dynamics over strategy population
 - `relationships/engine.py` — LTV-aware personalization
 - `policy/gates.py` — money-action gates → ALLOWED/REQUIRES_APPROVAL/BLOCKED
@@ -63,6 +68,22 @@ pip install -e ".[dev]"
 python -m pytest
 uvicorn api.index:app --reload
 ```
+
+## Benchmark
+
+`simulation/benchmark.py` plays Chotu against synthetic opponents generated
+with independent cost/reservation/patience/urgency parameters, and compares
+it against baselines (fixed price, linear concession, tit-for-tat, random,
+Nash heuristic):
+
+```python
+from economic_engine.simulation.benchmark import benchmark, ChotuPolicy
+benchmark(n=100, policies={"chotu": ChotuPolicy()})
+```
+
+This is the empirical backbone of the engine: if Chotu is meant to beat
+humans/simple strategies, this is where that claim is tested, measured in
+surplus, win-rate, avg rounds (deal time) and walkaway rate.
 
 ## Deploy to Vercel
 

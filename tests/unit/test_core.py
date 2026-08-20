@@ -1,6 +1,6 @@
 import numpy as np
 
-from economic_engine.models.supplier_model import SupplierPosterior
+from economic_engine.negotiation.opponent import OpponentLatent, OpponentState
 from economic_engine.state.canonical import (
     Constraints,
     Inventory,
@@ -41,13 +41,13 @@ def test_embedder_determinism():
     assert np.allclose(v1, v2)
 
 
-def test_supplier_posterior_updates():
-    p = SupplierPosterior()
-    before = p.reservation_mean
-    p.update_from_round(
-        round_index=0, proposed_price=100, response="ACCEPT",
-    )
-    assert p.reservation_mean != before
+def test_opponent_posterior_updates():
+    op = OpponentState(OpponentLatent(reservation_price=100, reservation_std=10))
+    before = op.theta.reservation_price
+    op.update_from_round(price=100, accepted=False)
+    assert op.theta.reservation_price != before
+    op.update_from_round(price=op.theta.reservation_price, accepted=True)
+    assert len(op.history) == 2
 
 
 def test_inventory_available():

@@ -11,7 +11,7 @@ from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
 
 from economic_engine.audit.logger import AuditLog
 from economic_engine.features.ingest import load_csv_bytes
-from economic_engine.models.supplier_model import SupplierPosterior
+from economic_engine.negotiation.opponent import OpponentLatent, OpponentState
 from economic_engine.negotiation.engine import NegotiationEngine
 from economic_engine.persistence.repository import InMemoryRepository, Repository
 from economic_engine.retrieval.numpy_index import NumpyCosineIndex
@@ -125,8 +125,7 @@ def build_app() -> FastAPI:
         neg = negotiations.get(negotiation_id)
         if neg is None:
             raise HTTPException(404)
-        posterior = SupplierPosterior()
-        engine = NegotiationEngine(posterior=posterior)
+        engine = NegotiationEngine()
         ctx = req.context
         ctx.negotiation = neg
         decision = engine.decide(ctx)

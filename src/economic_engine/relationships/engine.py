@@ -1,7 +1,7 @@
 """Relationship engine: LTV-aware deals for returning suppliers/merchants."""
 from __future__ import annotations
 
-from economic_engine.models.supplier_model import SupplierPosterior
+from economic_engine.negotiation.opponent import OpponentState
 from economic_engine.negotiation.strategies import Candidate
 from economic_engine.state.canonical import NegotiationContext, Relationship
 
@@ -15,15 +15,16 @@ class RelationshipEngine:
         self,
         ctx: NegotiationContext,
         candidate: Candidate,
-        posterior: SupplierPosterior,
+        opponent,
     ) -> Candidate:
         rel = ctx.relationship
         if rel is None:
             return candidate
         val = self.estimate_relationship_value(rel)
+        reservation = getattr(opponent.theta, "reservation_price", 1.0)
         if candidate.price is not None:
             candidate.price = max(
                 candidate.price - 0.02 * val * abs(candidate.price),
-                posterior.reservation_mean,
+                reservation,
             )
         return candidate
