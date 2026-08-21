@@ -72,15 +72,14 @@ class EnsemblePolicy:
         if not candidates:
             return None
         reservation = self.opponent.theta.reservation_price
+        # Dimensionless hazard: distance under reservation as a fraction of
+        # base (not scaled by base again inside the walk penalty).
         scores = {}
         for name, price in candidates.items():
-            # Retained surplus = how much below base we land.
-            retained = base - float(price)
-            # Walkaway hazard from the posterior: price under reservation
-            # materially raises walkaway probability.
-            gap = max(reservation - float(price), 0.0)
-            p_walk = min(0.05 + gap / max(reservation, 1e-3), 0.6)
-            scores[name] = retained - self.walk_cost * p_walk * base
+            retained_frac = (base - float(price)) / base
+            gap_frac = max(reservation - float(price), 0.0) / base
+            p_walk = min(0.05 + gap_frac, 0.6)
+            scores[name] = retained_frac - self.walk_cost * p_walk
         winner = max(scores, key=scores.get)
         return candidates[winner]
 
