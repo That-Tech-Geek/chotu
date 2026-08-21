@@ -145,13 +145,22 @@ Every adapter is real HTTP; when its env vars are absent it reports
 | `SUPABASE_URL` / `SUPABASE_KEY` | Persistence + action ledger (`action_records` with unique `idempotency_key`) |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Atomic once-only execution lock (`SET NX EX`) — primary claim primitive |
 
-**Once-only execution** uses claim-then-execute against two independent cloud
-primitives: Upstash Redis `SET key payload NX EX ttl` (atomic CAS — exactly
-one caller wins before any side effect fires; TTL expiry safely covers
-process death between claim and execute) and a Supabase
-`resolution=ignore-duplicates` upsert verified by fingerprint. No local
-caches anywhere in the path — every check hits the cloud store, so concurrent
-Vercel invocations cannot both win.
+**Once-only execution** uses claim-then-execute against **one authoritative
+arbiter**: Upstash Redis `SET key payload NX EX ttl` (atomic CAS — exactly
+one caller wins before any side effect fires). Supabase `action_records` is
+a durable *ledger*, consulted only when the lock is *unavailable* — never
+when the lock authoritatively says `already_claimed`. No local caches
+anywhere in the path.
+
+Connector outcomes are three-way, never conflated: `success` (provider
+confirmed), definite refusal (4xx/5xx body — claim CAS-released for retry),
+and `outcome: unknown` (timeout/no response — the claim is **held** and the
+action enters `UNKNOWN`). UNKNOWN actions are never blind-retried; an
+out-of-band `Executor.reconcile()` resolves them against the provider's own
+state (e.g. Razorpay payment lookup by `reference_id`, Shopify order
+lookup), marking `EXECUTED` on confirmation or releasing the claim when the
+provider confirms no effect. Razorpay payment links carry the Chotu
+`action_id` as `reference_id` — provider-level idempotency for free.
 
 ## Benchmark (Pareto + leakage-safe hierarchy)
 

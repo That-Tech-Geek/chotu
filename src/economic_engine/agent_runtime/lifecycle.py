@@ -10,7 +10,8 @@ class ActionState(enum.Enum):
     QUEUED = "QUEUED"
     EXECUTING = "EXECUTING"
     EXECUTED = "EXECUTED"
-    FAILED = "FAILED"
+    FAILED = "FAILED"          # provider definitively refused
+    UNKNOWN = "UNKNOWN"        # network timeout / no response — effect uncertain
     RETRYABLE = "RETRYABLE"
     BLOCKED = "BLOCKED"
     EXPIRED = "EXPIRED"

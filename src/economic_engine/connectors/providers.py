@@ -31,7 +31,16 @@ class LogisticsProvider(Protocol):
 class ActionConnector(Protocol):
     """Side-effect connector: where 'execute a negotiation action' becomes
     a real email/WhatsApp/API call. Implementations are infra-only; the brain
-    never calls them directly — only the runtime does."""
+    never calls them directly — only the runtime does.
+
+    Contract: send() NEVER raises for transport problems. It returns one of:
+        {"success": True, ...}               — provider confirmed
+        {"success": False, "error": ...}     — provider definitively refused
+        {"outcome": "unknown", "error": ...} — timeout/no response: the side
+                                               effect may have happened. The
+                                               executor treats this as UNKNOWN
+                                               and requires reconciliation.
+    """
 
     def send(self, deal: "Deal") -> dict: ...
 
@@ -61,8 +70,16 @@ class EmailConnector:
             )
             resp.raise_for_status()
             return {"success": True, "status": resp.status_code, "action": "email"}
+        except httpx.TimeoutException as e:
+            return {"outcome": "unknown", "error": f"timeout: {e}", "action": "email"}
+        except httpx.ConnectError as e:
+            return {"outcome": "unknown", "error": f"connect: {e}", "action": "email"}
+        except httpx.HTTPStatusError as e:
+            # 4xx/5xx — provider responded; that is a definite refusal.
+            return {"success": False,
+                    "error": f"status {e.response.status_code}", "action": "email"}
         except httpx.HTTPError as e:
-            return {"success": False, "error": str(e), "action": "email"}
+            return {"outcome": "unknown", "error": str(e), "action": "email"}
 
 
 class WhatsAppConnector:
@@ -90,8 +107,15 @@ class WhatsAppConnector:
             )
             resp.raise_for_status()
             return {"success": True, "status": resp.status_code, "action": "whatsapp"}
+        except httpx.TimeoutException as e:
+            return {"outcome": "unknown", "error": f"timeout: {e}", "action": "whatsapp"}
+        except httpx.ConnectError as e:
+            return {"outcome": "unknown", "error": f"connect: {e}", "action": "whatsapp"}
+        except httpx.HTTPStatusError as e:
+            return {"success": False,
+                    "error": f"status {e.response.status_code}", "action": "whatsapp"}
         except httpx.HTTPError as e:
-            return {"success": False, "error": str(e), "action": "whatsapp"}
+            return {"outcome": "unknown", "error": str(e), "action": "whatsapp"}
 
 
 class MockConnector:

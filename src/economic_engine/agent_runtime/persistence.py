@@ -46,17 +46,22 @@ class UpstashLock:
         return bool(self.url and self.token)
 
     def claim(self, key: str, payload: dict) -> ClaimResult:
-        """SET key payload NX EX ttl — atomic. Returns claimed=True only for
-        the single winner."""
+        """SET key payload NX EX ttl — atomic. reason distinguishes
+        'unavailable' (transient, fallback allowed) from 'already_claimed'
+        (authoritative denial, NEVER fall through to another arbiter)."""
         if not self.live:
-            return ClaimResult(claimed=False, reason="upstash_not_configured")
-        resp = httpx.post(
-            self.url,
-            headers={"Authorization": f"Bearer {self.token}"},
-            json=["SET", key, _encode(payload), "NX", "EX", self.ttl],
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
+            return ClaimResult(claimed=False, reason="unavailable")
+        try:
+            resp = httpx.post(
+                self.url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                json=["SET", key, _encode(payload), "NX", "EX", self.ttl],
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            return ClaimResult(claimed=False, reason="unavailable",
+                               owner_payload={"error": str(e)})
         result = resp.json().get("result")
         if result == "OK":
             return ClaimResult(claimed=True)
@@ -73,6 +78,32 @@ class UpstashLock:
             self.url,
             headers={"Authorization": f"Bearer {self.token}"},
             json=["SET", key, _encode(payload), "XX", "KEEPTTL"],
+            timeout=self.timeout,
+        ).raise_for_status()
+
+    def mark_unknown(self, key: str, payload: dict) -> None:
+        """Record UNKNOWN: the side effect may or may not have happened.
+        Holds the claim (KEEPTTL) so nobody retries until reconciliation."""
+        if not self.live:
+            return
+        payload = {**payload, "state": "UNKNOWN", "unknown_at": time.time()}
+        httpx.post(
+            self.url,
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=["SET", key, _encode(payload), "XX", "KEEPTTL"],
+            timeout=self.timeout,
+        ).raise_for_status()
+
+    def mark_failed(self, key: str, payload: dict) -> None:
+        """Record definite failure with a long fresh TTL so the ledger knows
+        this attempt died (distinct from UNKNOWN, which needs reconcile)."""
+        if not self.live:
+            return
+        payload = {**payload, "state": "FAILED", "failed_at": time.time()}
+        httpx.post(
+            self.url,
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=["SET", key, _encode(payload), "EX", 86400],
             timeout=self.timeout,
         ).raise_for_status()
 

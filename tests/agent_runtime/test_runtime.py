@@ -66,6 +66,15 @@ class _FakeLock:
     def mark_executed(self, key, payload):
         self.claimed[key] = payload
 
+    def mark_unknown(self, key, payload):
+        self.claimed[key] = {**payload, "state": "UNKNOWN"}
+
+    def mark_failed(self, key, payload):
+        self.claimed[key] = {**payload, "state": "FAILED"}
+
+    def _get(self, key):
+        return self.claimed.get(key)
+
     def release(self, key, payload):
         if self.claimed.get(key, {}).get("fingerprint") == payload.get("fingerprint"):
             self.claimed.pop(key, None)
@@ -86,6 +95,11 @@ class NullConnector:
 class FailingConnector:
     def send(self, deal):
         return {"success": False, "error": "provider down"}
+
+
+class TimeoutConnector:
+    def send(self, deal):
+        return {"outcome": "unknown", "error": "timeout after 10s"}
 
 
 def _executor(connector=None):
@@ -135,3 +149,58 @@ def test_shadow_execution_recorded_not_sent():
     out = rt.handle("n", "a", 0, d, ctx(), shadow=True)
     assert out["action"] == "EXECUTED"
     assert out["shadow"] is True
+
+
+def test_unknown_holds_claim_blocks_retry():
+    ex = _executor(TimeoutConnector())
+    d = Deal(price=1.0)
+    r1 = ex.run("n1", "a1", 0, d)
+    assert r1.state.value == "UNKNOWN"
+    # Blind retry is blocked: the claim is held, not released.
+    ex.lock.mark_unknown = lambda k, p: None  # no-op mark for fake lock
+    ex.lock._get = lambda k: ex.lock.claimed.get(k)
+    r2 = ex.run("n1", "a1", 0, d)
+    assert r2.state.value == "BLOCKED"
+    assert "duplicate_claim" in (r2.reason or "")
+
+
+def test_reconcile_confirmed_marks_executed():
+    ex = _executor(NullConnector())
+    d = Deal(price=1.0)
+    ex.lock.claim("n1:a1:0", {"fingerprint": "fp", "deal": d.model_dump(mode="json")})
+    ex.lock._get = lambda k: ex.lock.claimed.get(k)
+    out = ex.reconcile("n1", "a1", 0, provider_confirmed=True,
+                       provider_reference="pay_xyz")
+    assert out.state.value == "EXECUTED"
+
+
+def test_reconcile_unconfirmed_releases_for_retry():
+    ex = _executor(NullConnector())
+    d = Deal(price=1.0)
+    ex.lock.claim("n1:a1:0", {"fingerprint": "fp", "deal": d.model_dump(mode="json")})
+    ex.lock._get = lambda k: ex.lock.claimed.get(k)
+    out = ex.reconcile("n1", "a1", 0, provider_confirmed=False)
+    assert out.state.value == "RETRYABLE"
+    # The claim is gone; a fresh attempt can claim again.
+    r = ex.run("n1", "a1", 0, d)
+    assert r.state.value == "EXECUTED"
+
+
+def test_single_arbiter_no_fallthrough_on_denial():
+    class LiveLedger:
+        live = True
+        called = False
+
+        def claim(self, key, payload):
+            self.called = True
+            return type("R", (), {"claimed": True, "reason": None,
+                                  "owner_payload": None})()
+
+    ex = _executor()
+    ledger = LiveLedger()
+    ex.ledger = ledger
+    # Pre-claim the key in the lock so the arbiter says already_claimed.
+    ex.lock.claim("n9:a9:0", {"fingerprint": "fp"})
+    out = ex.run("n9", "a9", 0, Deal(price=2.0))
+    assert out.state.value == "BLOCKED"
+    assert ledger.called is False  # MUST NOT consult a second arbiter

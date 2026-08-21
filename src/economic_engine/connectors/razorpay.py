@@ -56,18 +56,22 @@ class RazorpayAdapter:
         return {**resp.json(), "live": True}
 
     def create_payment_link(self, negotiation_id: str, amount: float,
-                            currency: str = "INR") -> dict:
-        """POST /v1/payment_links — amount is in rupees; API wants paise."""
+                            currency: str = "INR",
+                            action_id: str | None = None) -> dict:
+        """POST /v1/payment_links — amount is in rupees; API wants paise.
+        reference_id doubles as the provider-level idempotency key: prefer
+        the Chotu action_id so the provider can de-duplicate retries."""
         if not self.live:
             return {"id": f"plv_{negotiation_id}", "amount": amount,
                     "status": "offline", "live": False}
+        reference = action_id or negotiation_id
         resp = httpx.post(
             f"{self.BASE_URL}/payment_links",
             auth=self._auth(),
             json={
                 "amount": int(round(amount * 100)),
                 "currency": currency,
-                "reference_id": negotiation_id,
+                "reference_id": reference,
                 "description": f"negotiation:{negotiation_id}",
             },
             timeout=self.timeout,
