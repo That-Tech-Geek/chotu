@@ -142,8 +142,16 @@ Every adapter is real HTTP; when its env vars are absent it reports
 | `SHOPIFY_SECRET` | HMAC-SHA256 base64 verify on inbound webhooks |
 | `EMAIL_WEBHOOK_URL` / `EMAIL_WEBHOOK_AUTH` | Outbound email relay POST target |
 | `WHATSAPP_WEBHOOK_URL` / `WHATSAPP_WEBHOOK_AUTH` | Outbound WhatsApp Business API / relay POST target |
-| `SUPABASE_URL` / `SUPABASE_KEY` | Persistence + durable idempotency (`action_records` table) |
-| `IDEMPOTENCY_CACHE_PATH` | Local file-cache fallback path (default `/tmp/idempotency_cache.jsonl`) |
+| `SUPABASE_URL` / `SUPABASE_KEY` | Persistence + action ledger (`action_records` with unique `idempotency_key`) |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Atomic once-only execution lock (`SET NX EX`) — primary claim primitive |
+
+**Once-only execution** uses claim-then-execute against two independent cloud
+primitives: Upstash Redis `SET key payload NX EX ttl` (atomic CAS — exactly
+one caller wins before any side effect fires; TTL expiry safely covers
+process death between claim and execute) and a Supabase
+`resolution=ignore-duplicates` upsert verified by fingerprint. No local
+caches anywhere in the path — every check hits the cloud store, so concurrent
+Vercel invocations cannot both win.
 
 ## Benchmark (Pareto + leakage-safe hierarchy)
 

@@ -39,6 +39,9 @@ create table if not exists action_records (
 
 alter table action_records enable row level security;
 
+-- fingerprint column distinguishes claim owners for the upsert-then-verify pattern
+alter table action_records add column if not exists fingerprint text;
+
 -- RLS policies: tenant-scoped by merchant_id.
 alter table merchants enable row level security;
 alter table suppliers enable row level security;
