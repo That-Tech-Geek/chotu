@@ -29,6 +29,16 @@ create table if not exists audit_events (id text primary key, event_type text, p
 create table if not exists index_versions (version int, created_at timestamptz default now(), description text);
 create table if not exists negotiation_embeddings (id text primary key, negotiation_id text, embedding vector(128), created_at timestamptz default now());
 
+-- Durable idempotency: one row per executed action key. Unique constraint is
+-- the cross-process guarantee against duplicate external side effects.
+create table if not exists action_records (
+    idempotency_key text primary key,
+    payload jsonb,
+    created_at timestamptz default now()
+);
+
+alter table action_records enable row level security;
+
 -- RLS policies: tenant-scoped by merchant_id.
 alter table merchants enable row level security;
 alter table suppliers enable row level security;

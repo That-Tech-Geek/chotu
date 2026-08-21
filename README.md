@@ -129,6 +129,22 @@ python -m pytest
 uvicorn api.index:app --reload
 ```
 
+## Integration configuration
+
+Every adapter is real HTTP; when its env vars are absent it reports
+`live: false` / falls back to the file cache instead of pretending success.
+
+| Env var | Purpose |
+|---|---|
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Basic auth for `api.razorpay.com/v1` (orders, payment links, payments) |
+| `RAZORPAY_WEBHOOK_SECRET` | HMAC-SHA256 verify on inbound webhooks |
+| `SHOPIFY_SHOP` / `SHOPIFY_ACCESS_TOKEN` | Admin REST `{shop}.myshopify.com/admin/api/2024-10` (products, orders, GraphQL) |
+| `SHOPIFY_SECRET` | HMAC-SHA256 base64 verify on inbound webhooks |
+| `EMAIL_WEBHOOK_URL` / `EMAIL_WEBHOOK_AUTH` | Outbound email relay POST target |
+| `WHATSAPP_WEBHOOK_URL` / `WHATSAPP_WEBHOOK_AUTH` | Outbound WhatsApp Business API / relay POST target |
+| `SUPABASE_URL` / `SUPABASE_KEY` | Persistence + durable idempotency (`action_records` table) |
+| `IDEMPOTENCY_CACHE_PATH` | Local file-cache fallback path (default `/tmp/idempotency_cache.jsonl`) |
+
 ## Benchmark (Pareto + leakage-safe hierarchy)
 
 `simulation/benchmark.py` plays Chotu against synthetic opponents generated

@@ -21,10 +21,7 @@ class ShadowPolicy:
     """Chotu wrapped in AutonomousRuntime with shadow=True."""
 
     def __init__(self):
-        from economic_engine.connectors.providers import NullActionConnector
-
-        class _NullConn(NullActionConnector):
-            pass
+        from economic_engine.connectors.providers import MockConnector
 
         envelope = PolicyEnvelope(
             max_unit_price=200.0,
@@ -33,7 +30,7 @@ class ShadowPolicy:
         )
         kill = KillSwitch(max_price=200.0)
         self.runtime = AutonomousRuntime(
-            envelope, kill, Executor(connector=_NullConn()),
+            envelope, kill, Executor(connector=MockConnector()),
         )
         self.brain = ChotuPolicy()
 

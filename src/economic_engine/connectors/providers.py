@@ -2,7 +2,10 @@
 behind these contracts so the engine never depends on provider schemas."""
 from __future__ import annotations
 
+import os
 from typing import Protocol
+
+import httpx
 
 
 class PaymentProvider(Protocol):
@@ -34,22 +37,69 @@ class ActionConnector(Protocol):
 
 
 class EmailConnector:
-    def __init__(self, webhook_url: str | None = None):
-        self.webhook_url = webhook_url
+    """POSTs the deal to a configured outbound webhook (SendGrid / SES relay /
+    internal mailer). Real HTTP side effect."""
+
+    def __init__(self, webhook_url: str | None = None,
+                 auth_header: str | None = None, timeout: float = 10.0):
+        self.webhook_url = webhook_url or os.environ.get("EMAIL_WEBHOOK_URL", "")
+        self.auth_header = auth_header or os.environ.get("EMAIL_WEBHOOK_AUTH", "")
+        self.timeout = timeout
 
     def send(self, deal: "Deal") -> dict:
         if not self.webhook_url:
             return {"success": False, "error": "webhook_url not configured"}
-        return {"success": True, "webhook_url": self.webhook_url,
-                "action": "email"}
+        headers = {"Content-Type": "application/json"}
+        if self.auth_header:
+            headers["Authorization"] = self.auth_header
+        try:
+            resp = httpx.post(
+                self.webhook_url,
+                headers=headers,
+                json={"channel": "email", "deal": deal.model_dump(mode="json")},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return {"success": True, "status": resp.status_code, "action": "email"}
+        except httpx.HTTPError as e:
+            return {"success": False, "error": str(e), "action": "email"}
 
 
 class WhatsAppConnector:
-    def __init__(self, webhook_url: str | None = None):
-        self.webhook_url = webhook_url
+    """POSTs the deal to a configured WhatsApp Business Cloud API endpoint
+    (or a relay webhook). Real HTTP side effect."""
+
+    def __init__(self, webhook_url: str | None = None,
+                 auth_header: str | None = None, timeout: float = 10.0):
+        self.webhook_url = webhook_url or os.environ.get("WHATSAPP_WEBHOOK_URL", "")
+        self.auth_header = auth_header or os.environ.get("WHATSAPP_WEBHOOK_AUTH", "")
+        self.timeout = timeout
 
     def send(self, deal: "Deal") -> dict:
         if not self.webhook_url:
             return {"success": False, "error": "webhook_url not configured"}
-        return {"success": True, "webhook_url": self.webhook_url,
-                "action": "whatsapp"}
+        headers = {"Content-Type": "application/json"}
+        if self.auth_header:
+            headers["Authorization"] = self.auth_header
+        try:
+            resp = httpx.post(
+                self.webhook_url,
+                headers=headers,
+                json={"channel": "whatsapp", "deal": deal.model_dump(mode="json")},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return {"success": True, "status": resp.status_code, "action": "whatsapp"}
+        except httpx.HTTPError as e:
+            return {"success": False, "error": str(e), "action": "whatsapp"}
+
+
+class MockConnector:
+    """Test-only: records sends, never leaves the process."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    def send(self, deal: "Deal") -> dict:
+        self.sent.append(deal.model_dump(mode="json"))
+        return {"success": True, "mock": True}
