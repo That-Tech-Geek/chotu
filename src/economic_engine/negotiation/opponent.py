@@ -82,6 +82,8 @@ class OpponentState:
         """Posterior update: theta -> theta' given the observed response."""
         self.history.append({"price": price, "accepted": accepted})
         if accepted:
+            # Supplier accepted `price`: their reservation is at or below the
+            # accepted price. Pull the posterior down toward it.
             self.theta.reservation_price = (
                 0.6 * self.theta.reservation_price
                 + 0.4 * price
@@ -91,8 +93,13 @@ class OpponentState:
                 self.theta.walkaway_probability - 0.05, 0.02,
             )
         else:
-            direction = -1 if price < self.theta.reservation_price else 1
-            self.theta.reservation_price += direction * 0.4 * self.theta.reservation_std
+            # Supplier rejected `price`: their reservation is at or above the
+            # rejected price. Push the posterior up toward (and beyond) it.
+            gap = max(price - self.theta.reservation_price, 0.0)
+            self.theta.reservation_price = (
+                0.5 * self.theta.reservation_price
+                + 0.5 * (price + 0.1 * self.theta.reservation_std)
+            )
             self.theta.reservation_std = min(
                 self.theta.reservation_std * 1.03,
                 self.theta.reservation_price * 0.5,

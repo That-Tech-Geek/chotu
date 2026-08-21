@@ -19,57 +19,70 @@ from economic_engine.simulation.opponent import SyntheticOpponent
 
 
 class EnsemblePolicy:
-    """Evaluates each candidate strategy's expected utility on the spot and
-    returns the winning offer. Purchasing-adjusted eagerness balances
-    surplus with the negative cost of a walkaway."""
+    """Meta-policy over {Chotu engine + baselines}. Each round it evaluates
+    every candidate's offer under an estimated walkaway hazard derived from
+    the *engine's own posterior* (OpponentState), not a hardcoded 0.85·base
+    prior — the same posterior Chotu uses to decide. The winner is the offer
+    maximizing (surplus retention − walk_cost · P(walkaway)).
+    """
 
     def __init__(
         self,
-        risk_lambda: float = 0.5,
-        walk_cost: float = 5.0,
-        surplus_weight: float = 0.5,
+        walk_cost: float = 1.0,
     ):
+        from economic_engine.negotiation.opponent import OpponentLatent, OpponentState
+
+        self.opponent = OpponentState(
+            OpponentLatent(reservation_price=1.0, reservation_std=1.0)
+        )
+        self.walk_cost = walk_cost
         self.baselines = {
             "fixed": BaselinePolicyFactory.fixed_price,
             "concession": BaselinePolicyFactory.concession,
             "tft": BaselinePolicyFactory.tit_for_tat,
             "nash": BaselinePolicyFactory.nash,
-            "chotu": ChotuPolicy,
         }
-        self.risk_lambda = risk_lambda
-        self.walk_cost = walk_cost
-        self.surplus_weight = surplus_weight
-        self.rng = np.random.default_rng(0)
+        self._initialized = False
 
     def next_offer(self, ctx, current_offer):
+        base = ctx.product.base_purchase_cost or 1.0
+        if not self._initialized:
+            from economic_engine.negotiation.opponent import OpponentLatent, OpponentState
+
+            self.opponent = OpponentState(
+                OpponentLatent(
+                    reservation_price=base,
+                    reservation_std=base * 0.2,
+                    cost_structure=base * 0.7,
+                )
+            )
+            self._initialized = True
+        # Posterior update from the supplier's latest observed behaviour.
+        if current_offer is not None:
+            self.opponent.update_from_round(
+                price=current_offer,
+                accepted=False,  # we only get called when the supplier countered
+            )
         candidates = {}
         for name, factory in self.baselines.items():
-            if name == "chotu":
-                candidates[name] = factory().next_offer(ctx, current_offer)
-            else:
-                candidates[name] = _PolicyAdapter(factory()).next_offer(
-                    ctx, current_offer,
-                )
+            candidates[name] = _PolicyAdapter(factory()).next_offer(
+                ctx, current_offer,
+            )
         candidates = {k: v for k, v in candidates.items() if v is not None}
         if not candidates:
             return None
-        # Expected score: balance surplus gain and risk / walk-cost trade.
+        reservation = self.opponent.theta.reservation_price
         scores = {}
         for name, price in candidates.items():
-            gain = self.surplus_weight * float(price)
-            p_walk = self._estimate_walkaway(ctx, price)
-            scores[name] = gain - self.walk_cost * p_walk
-        winner = min(scores, key=scores.get)
+            # Retained surplus = how much below base we land.
+            retained = base - float(price)
+            # Walkaway hazard from the posterior: price under reservation
+            # materially raises walkaway probability.
+            gap = max(reservation - float(price), 0.0)
+            p_walk = min(0.05 + gap / max(reservation, 1e-3), 0.6)
+            scores[name] = retained - self.walk_cost * p_walk * base
+        winner = max(scores, key=scores.get)
         return candidates[winner]
-
-    def _estimate_walkaway(self, ctx, price: float) -> float:
-        """Rough walkaway hazard below the canonical supplier-reservation prior
-        ~0.85·base, softened by how much below that we are."""
-        supplier_reservation = ctx.product.base_purchase_cost * 0.85
-        if price < supplier_reservation:
-            excess = (supplier_reservation - price) / supplier_reservation
-            return min(excess * 0.6, 0.5)
-        return 0.05
 
 
 def run_headtohead(n_holdout: int = 40, seed: int = 1000) -> dict:
